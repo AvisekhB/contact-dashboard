@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Call Dashboard</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#1d2433;--mute:#6b7488;--line:#e3e7f0;--green:#16a34a;--red:#e11d48;--amber:#f59e0b;--blue:#2563eb;--wa:#25d366}
+@media (prefers-color-scheme:dark){:root{--bg:#10131c;--card:#1a1f2d;--ink:#eef1f8;--mute:#9aa3b8;--line:#2a3144}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:14px;max-width:760px;margin-inline:auto}
+h1{font-size:22px;margin:4px 0 12px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+textarea,input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px}
+textarea{min-height:110px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:10px 12px;cursor:pointer;color:#fff;background:var(--blue)}
+button.ghost{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+.hint{color:var(--mute);font-size:13px;margin:6px 0 0}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.stat{border-radius:12px;padding:10px 6px;text-align:center;color:#fff;font-weight:700}
+.stat small{display:block;font-weight:500;opacity:.9;font-size:11px}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin:10px 0}
+.tab{flex:none;background:var(--card);color:var(--ink);border:1px solid var(--line);padding:7px 12px;border-radius:99px;font-weight:500}
+.tab.on{background:var(--ink);color:var(--bg)}
+.c{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--accent,#999);border-radius:14px;padding:12px;margin-bottom:10px}
+.top{display:flex;gap:10px;align-items:center}
+.av{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:18px;flex:none}
+.nm{font-weight:700;font-size:16px;word-break:break-word}
+.ph{color:var(--mute);font-size:14px}
+.star{margin-left:auto;background:none;color:var(--mute);font-size:24px;padding:0 4px}
+.star.on{color:var(--amber)}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.acts a{text-align:center;text-decoration:none;color:#fff;font-weight:700;padding:11px;border-radius:10px}
+.call{background:var(--blue)}.wa{background:var(--wa)}
+.st{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.st button{padding:8px 4px;font-size:13px;background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+.st button.on.picked{background:var(--green);color:#fff;border-color:var(--green)}
+.st button.on.notpicked{background:var(--red);color:#fff;border-color:var(--red)}
+.st button.on.later{background:var(--amber);color:#fff;border-color:var(--amber)}
+.meta{display:flex;gap:8px;margin-top:8px}
+.meta input{padding:7px;font-size:13px}
+.meta .x{flex:none;background:none;color:var(--red);padding:0 8px}
+.empty{text-align:center;color:var(--mute);padding:30px 10px}
+</style>
+</head>
+<body>
+<h1>📞 Call Dashboard</h1>
+
+<div class="box">
+  <b>1. Paste contacts</b>
+  <p class="hint">Scan the printed list with Google Lens → Copy text → paste here.</p>
+  <textarea id="paste" placeholder="Ravi Kumar 98765 43210&#10;Sita Devi&#10;9123456789"></textarea>
+  <div class="row" style="margin-top:8px">
+    <input id="cc" value="91" inputmode="numeric" aria-label="Country code" style="max-width:110px;flex:none">
+    <button id="add">Find names &amp; numbers</button>
+  </div>
+  <p class="hint">Country code (91 = India) is added to 10-digit numbers for WhatsApp.</p>
+</div>
+
+<div class="stats" id="stats"></div>
+<input id="q" placeholder="Search name or number">
+<div class="tabs" id="tabs"></div>
+<div id="list"></div>
+
+<div class="row">
+  <button class="ghost" id="csv">Download CSV</button>
+  <button class="ghost" id="clear">Delete all</button>
+</div>
+
+<script>
+const KEY="callDash.v1";
+let data=[],filter="all";
+try{data=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){data=[]}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}};
+const $=id=>document.getElementById(id);
+const colors=["#2563eb","#db2777","#7c3aed","#ea580c","#0d9488","#ca8a04","#dc2626","#0891b2","#65a30d"];
+const color=s=>colors[[...s].reduce((a,c)=>a+c.charCodeAt(0),0)%colors.length];
+const PH=/(\+?\d[\d\s\-().]{7,}\d)/;
+
+function parse(text,cc){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const out=[];let pendingName="";
+  const clean=n=>{let d=n.replace(/[^\d+]/g,"");
+    if(d.startsWith("+"))d=d.slice(1);
+    else if(d.startsWith("00"))d=d.slice(2);
+    else if(d.length==11&&d[0]=="0")d=cc+d.slice(1);
+    else if(d.length==10)d=cc+d;
+    return d};
+  const nm=s=>s.replace(/[|:,;\-–_•·]+/g," ").replace(/\s+/g," ").trim();
+  for(const l of lines){
+    const m=l.match(PH);
+    if(m){
+      const before=nm(l.replace(m[0]," "));
+      const name=before||pendingName||"Unnamed";
+      out.push({name,raw:m[0].trim(),num:clean(m[0])});
+      pendingName="";
+    }else{pendingName=nm(l)}
+  }
+  return out;
+}
+
+$("add").onclick=()=>{
+  const found=parse($("paste").value,$("cc").value.replace(/\D/g,""));
+  if(!found.length){alert("No phone numbers found. Check the pasted text.");return}
+  let added=0;
+  found.forEach(f=>{
+    if(data.some(d=>d.num===f.num))return;
+    data.unshift({id:Date.now()+Math.random(),name:f.name,raw:f.raw,num:f.num,status:"new",star:false,note:"",date:""});added++;
+  });
+  save();$("paste").value="";render();
+  alert(added+" contact(s) added"+(found.length-added?", "+(found.length-added)+" duplicate(s) skipped":""));
+};
+
+const TABS=[["all","All"],["new","Not called"],["picked","Picked"],["notpicked","Not picked"],["later","Follow up"],["star","★ Saved"]];
+const ACC={new:"#9aa3b8",picked:"var(--green)",notpicked:"var(--red)",later:"var(--amber)"};
+function set(id,k,v){const c=data.find(d=>d.id==id);c[k]=v;save();render(k=="note"||k=="date")}
+function del(id){if(confirm("Delete this contact?")){data=data.filter(d=>d.id!=id);save();render()}}
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function render(keepFocus){
+  const n=s=>data.filter(d=>d.status==s).length;
+  $("stats").innerHTML=[["Total",data.length,"#2563eb"],["Picked",n("picked"),"#16a34a"],["Not picked",n("notpicked"),"#e11d48"],["Follow up",n("later"),"#f59e0b"]]
+    .map(s=>`<div class="stat" style="background:${s[2]}">${s[1]}<small>${s[0]}</small></div>`).join("");
+  $("tabs").innerHTML=TABS.map(t=>`<button class="tab ${filter==t[0]?"on":""}" data-t="${t[0]}">${t[1]}</button>`).join("");
+  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{filter=b.dataset.t;render()});
+  if(keepFocus===true)return;
+  const q=$("q").value.toLowerCase();
+  const rows=data.filter(d=>(filter=="all"||(filter=="star"?d.star:d.status==filter))&&(d.name.toLowerCase().includes(q)||d.num.includes(q)));
+  $("list").innerHTML=rows.length?rows.map(d=>`
+  <div class="c" style="--accent:${ACC[d.status]}">
+    <div class="top">
+      <div class="av" style="background:${color(d.name)}">${esc(d.name[0].toUpperCase())}</div>
+      <div><div class="nm">${esc(d.name)}</div><div class="ph">${esc(d.raw)}</div></div>
+      <button class="star ${d.star?"on":""}" onclick="set(${d.id},'star',${!d.star})" aria-label="Bookmark">${d.star?"★":"☆"}</button>
+    </div>
+    <div class="acts">
+      <a class="call" href="tel:+${d.num}">📞 Call</a>
+      <a class="wa" href="https://wa.me/${d.num}" target="_blank" rel="noopener">💬 WhatsApp</a>
+    </div>
+    <div class="st">
+      ${[["picked","✅ Picked"],["notpicked","❌ Not picked"],["later","⏰ Follow up"]].map(s=>`<button class="${s[0]} ${d.status==s[0]?"on":""}" onclick="set(${d.id},'status','${d.status==s[0]?"new":s[0]}')">${s[1]}</button>`).join("")}
+    </div>
+    <div class="meta">
+      <input type="date" value="${d.date}" onchange="set(${d.id},'date',this.value)" aria-label="Follow-up date" style="max-width:150px">
+      <input placeholder="Note" value="${esc(d.note)}" onchange="set(${d.id},'note',this.value)">
+      <button class="x" onclick="del(${d.id})" aria-label="Delete">🗑</button>
+    </div>
+  </div>`).join(""):`<div class="empty">No contacts here yet. Paste your list above.</div>`;
+}
+$("q").oninput=()=>render();
+$("clear").onclick=()=>{if(confirm("Delete ALL contacts?")){data=[];save();render()}};
+$("csv").onclick=()=>{
+  const L={new:"Not called",picked:"Picked",notpicked:"Not picked",later:"Follow up"};
+  const rows=[["Name","Phone","Status","Bookmarked","Follow-up date","Note"],...data.map(d=>[d.name,"+"+d.num,L[d.status],d.star?"Yes":"",d.date,d.note])];
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="contacts.csv";a.click();
+};
+render();
+</script>
+</body>
+</html>
